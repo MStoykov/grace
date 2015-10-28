@@ -25,6 +25,14 @@ var (
 	ppid       = os.Getppid()
 )
 
+// ListenerWrapper gets a net.Listener and returns a net.Listener
+type ListenerWrapper func(net.Listener) net.Listener
+
+// identityListenerWrapper returns the same net.Listener it gets
+func identityListenerWrapper(l net.Listener) net.Listener {
+	return l
+}
+
 // An app contains one or more servers and associated configuration.
 type app struct {
 	servers   []*http.Server
@@ -49,13 +57,14 @@ func newApp(servers []*http.Server) *app {
 	}
 }
 
-func (a *app) listen() error {
+func (a *app) listen(wrapper ListenerWrapper) error {
 	for _, s := range a.servers {
 		// TODO: default addresses
 		l, err := a.net.Listen("tcp", s.Addr)
 		if err != nil {
 			return err
 		}
+		l = wrapper(l)
 		if s.TLSConfig != nil {
 			l = tls.NewListener(l, s.TLSConfig)
 		}
@@ -121,10 +130,15 @@ func (a *app) signalHandler(wg *sync.WaitGroup) {
 // Serve will serve the given http.Servers and will monitor for signals
 // allowing for graceful termination (SIGTERM) or restart (SIGUSR2).
 func Serve(servers ...*http.Server) error {
+	return ServeWithWrapper(identityListenerWrapper, servers...)
+}
+
+// ServeWithWrapper is the same as Serve but the wrapper is used on all the underlying listeners
+func ServeWithWrapper(wrapper ListenerWrapper, servers ...*http.Server) error {
 	a := newApp(servers)
 
 	// Acquire Listeners
-	if err := a.listen(); err != nil {
+	if err := a.listen(wrapper); err != nil {
 		return err
 	}
 
